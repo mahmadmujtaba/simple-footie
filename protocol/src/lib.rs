@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use std::ptr::read_unaligned;
+
 // ── Command Types ───────────────────────────────────────────────
 
 /// A command from client to server (10 bytes steady state).
@@ -97,6 +99,18 @@ pub struct EventPacket {
     pub team: Team,
     pub player_index: u16,
     pub value: f32,
+}
+
+impl EventPacket {
+    /// Safely copy fields out of a packed struct to avoid unaligned access UB.
+    pub fn unpack(&self) -> (u32, EventType, Team, u16, f32) {
+        let ptr = self as *const Self as *const u8;
+        let match_id = unsafe { read_unaligned(ptr as *const u32) };
+        // event_type at offset 4, team at offset 5 — these are u8, always aligned
+        let player_index = unsafe { read_unaligned(ptr.add(6) as *const u16) };
+        let value = unsafe { read_unaligned(ptr.add(8) as *const f32) };
+        (match_id, self.event_type, self.team, player_index, value)
+    }
 }
 
 /// All possible match event types.

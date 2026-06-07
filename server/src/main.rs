@@ -19,7 +19,7 @@ mod token;
 use crossbeam::channel;
 use http_bridge::{start_http_bridge, HttpState};
 use metrics::{start_metrics_server, Metrics};
-use network::NetworkReceiver;
+use network::{EventSender, NetworkReceiver};
 use simulation_core::SimulationCore;
 use std::path::Path;
 use std::thread;
@@ -37,15 +37,25 @@ fn main() {
     // ── Token manager (shared state, thread-safe) ───────────────
     let tokens = TokenManager::new();
 
-    // ── Metrics ─────────────────────────────────────────────────
-    let metrics = Metrics::new();
-    metrics
-        .active_matches
-        .store(1, std::sync::atomic::Ordering::Relaxed);
-    let _metrics_handle = start_metrics_server(metrics.clone());
+    // ── Event sender (sends events to clients via UDP) ──────────
+    let event_sender = EventSender::bind("0.0.0.0:0").expect("Failed to bind event sender");
+
+    // ── Simulation core ─────────────────────────────────────────
+    let mut sim_core = SimulationCore::new(cmd_rx, tokens, Some(event_sender));
+
+    // Create a demo match so there's something to see
+    let token = sim_core.create_match(1, 80, 75);
+    println!("  Created match #1 (Rustington 80 vs FC Terminal 75)");
+    println!(
+        "  Auth token: {:02x}{:02x}{:02x}...\n",
+        token[0], token[1], token[2]
+    );
 
     // ── HTTP Bridge (control panel on port 8080) ────────────────
+    // Create HttpState AFTER the match token is known, so HTTP clients
+    // see the correct token immediately.
     let http_state = HttpState::new();
+    *http_state.match_token.lock().unwrap() = token;
     let _http_handle = start_http_bridge(cmd_tx.clone(), http_state.clone());
     println!("  Control panel: http://127.0.0.1:8080");
 
@@ -63,16 +73,12 @@ fn main() {
         Err(e) => eprintln!("  ⚠  Failed to check disk space: {e}"),
     }
 
-    // ── Simulation core ─────────────────────────────────────────
-    let mut sim_core = SimulationCore::new(cmd_rx, tokens);
-
-    // Create a demo match so there's something to see
-    let token = sim_core.create_match(1, 80, 75);
-    println!("  Created match #1 (Rustington 80 vs FC Terminal 75)");
-    println!(
-        "  Auth token: {:02x}{:02x}{:02x}...\n",
-        token[0], token[1], token[2]
-    );
+    // ── Metrics ─────────────────────────────────────────────────
+    let metrics = Metrics::new();
+    metrics
+        .active_matches
+        .store(1, std::sync::atomic::Ordering::Relaxed);
+    let _metrics_handle = start_metrics_server(metrics.clone());
 
     // ── Network receiver (would go on Core 0) ───────────────────
     let net_cmd_tx = cmd_tx.clone();

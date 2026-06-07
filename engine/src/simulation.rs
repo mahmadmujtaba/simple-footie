@@ -192,14 +192,16 @@ pub fn simulate_minutes(
         }
     }
 
-    // Full time
-    events.push(SimEvent {
-        minute: 90,
-        event_type: EventType::FullTime,
-        team: Team::Home,
-        player_index: 0,
-        value: 0.0,
-    });
+    // Full time — only emit if the match actually reached 90 minutes
+    if end_minute >= 90 {
+        events.push(SimEvent {
+            minute: 90,
+            event_type: EventType::FullTime,
+            team: Team::Home,
+            player_index: 0,
+            value: 0.0,
+        });
+    }
 
     MatchResult {
         state,

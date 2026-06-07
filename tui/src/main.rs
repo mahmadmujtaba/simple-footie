@@ -2,7 +2,7 @@ use color_eyre::eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use engine::player::generate_synthetic_squad;
 use engine::simulation::simulate_minutes;
-use protocol::{MatchState, TacticState, Team};
+use protocol::{CommandType, MatchState, TacticState, Team};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
@@ -10,6 +10,9 @@ use ratatui::{
     widgets::{Block, Borders, Cell, List, ListItem, Paragraph, Row, Table, Tabs},
     Frame,
 };
+mod server_client;
+
+use server_client::ServerClient;
 use std::time::Duration;
 
 fn main() -> Result<()> {
@@ -114,6 +117,9 @@ struct App {
     messages: Vec<String>,
     match_log: Vec<String>,
     match_score: [u8; 2],
+    connected: bool,
+    server_client: Option<ServerClient>,
+    seq: u16,
 }
 
 impl App {
@@ -136,8 +142,29 @@ impl App {
             ],
             match_log: vec![],
             match_score: [0, 0],
+            connected: false,
+            server_client: None,
+            seq: 0,
         };
-        app.simulate_demo_match();
+
+        // Try to connect to the game server
+        match ServerClient::connect("127.0.0.1") {
+            Ok(client) => {
+                app.connected = true;
+                app.server_client = Some(client);
+                app.messages
+                    .insert(0, "✅ Connected to game server (127.0.0.1)".into());
+            }
+            Err(e) => {
+                app.messages.insert(
+                    0,
+                    format!("⚠️ Server not available: {}. Running offline.", e),
+                );
+                // Fall back to local simulation
+                app.simulate_demo_match();
+            }
+        }
+
         app
     }
 
@@ -222,7 +249,21 @@ impl App {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(false),
-                        KeyCode::Char('s') => self.simulate_demo_match(),
+                        KeyCode::Char('s') => {
+                            if !self.connected {
+                                self.simulate_demo_match();
+                            }
+                        }
+                        // Tactical commands (only when connected)
+                        KeyCode::Char('1') => self.send_tactical(CommandType::Mentality, 0, 0), // Normal
+                        KeyCode::Char('2') => self.send_tactical(CommandType::Mentality, 0, 1), // Attack
+                        KeyCode::Char('3') => self.send_tactical(CommandType::Mentality, 0, 2), // Defend
+                        KeyCode::Char('4') => self.send_tactical(CommandType::Press, 0, 0), // Low press
+                        KeyCode::Char('5') => self.send_tactical(CommandType::Press, 0, 1), // Medium press
+                        KeyCode::Char('6') => self.send_tactical(CommandType::Press, 0, 2), // High press
+                        KeyCode::Char('7') => self.send_tactical(CommandType::Tempo, 0, 0), // Slow tempo
+                        KeyCode::Char('8') => self.send_tactical(CommandType::Tempo, 0, 1), // Normal tempo
+                        KeyCode::Char('9') => self.send_tactical(CommandType::Tempo, 0, 2), // Fast tempo
                         KeyCode::Tab | KeyCode::Right => {
                             self.tab_index = (self.tab_index + 1) % Screen::all().len();
                             self.scroll_offset = 0;
@@ -248,6 +289,17 @@ impl App {
                 }
             }
         }
+        // Poll for incoming UDP events (drain into local vec to avoid borrow conflict)
+        let mut events: Vec<protocol::EventPacket> = Vec::new();
+        if let Some(ref client) = self.server_client {
+            while let Ok(event) = client.event_rx.try_recv() {
+                events.push(event);
+            }
+        }
+        for event in events {
+            self.process_server_event(event);
+        }
+
         Ok(true)
     }
 
@@ -706,12 +758,88 @@ impl App {
     }
 
     fn render_status_bar(&self, frame: &mut Frame, area: Rect) {
+        let conn_label = if self.connected {
+            "Connected"
+        } else {
+            "Offline"
+        };
         let status = format!(
-            " [Tab/Arrows: Navigate]  |  Screen: {}  |  Players: {}  |  's': Sim match  |  'q': Quit ",
-            Screen::all()[self.tab_index].label().trim(), self.players.len()
+            " [Tab/Arrows: Navigate]  |  Screen: {}  |  Players: {}  |  1-3:Mentality 4-6:Press 7-9:Tempo  |  {}  |  'q': Quit ",
+            Screen::all()[self.tab_index].label().trim(),
+            self.players.len(),
+            conn_label,
         );
         let block = Block::default().style(Style::default().fg(Color::Black).bg(Color::Gray));
         frame.render_widget(Paragraph::new(status).block(block), area);
+    }
+
+    fn send_tactical(&mut self, cmd_type: CommandType, team: u8, value: u8) {
+        if let Some(ref mut client) = self.server_client {
+            let label = format!("{:?}={}", cmd_type, value);
+            match client.send_command(cmd_type, team, value) {
+                Ok(_) => {
+                    self.messages.insert(0, format!("📤 Sent: {}", label));
+                    self.messages.truncate(20);
+                }
+                Err(e) => {
+                    self.messages.insert(0, format!("⚠️ Command failed: {}", e));
+                }
+            }
+        }
+    }
+
+    fn process_server_event(&mut self, event: protocol::EventPacket) {
+        // Safely unpack fields from the packed struct to avoid UB on u32/u16/f32
+        let (_mid, ev_type, ev_team, ev_player_index, _val) = event.unpack();
+
+        let team_name = match ev_team {
+            protocol::Team::Home => "Rustington",
+            protocol::Team::Away => "FC Terminal",
+        };
+
+        // Update score for goals
+        if ev_type == protocol::EventType::Goal {
+            if ev_team == protocol::Team::Home {
+                self.match_score[0] = self.match_score[0].wrapping_add(1);
+            } else {
+                self.match_score[1] = self.match_score[1].wrapping_add(1);
+            }
+        }
+
+        // Add to match log
+        let msg = match ev_type {
+            protocol::EventType::Kickoff => "Kickoff!".into(),
+            protocol::EventType::Goal => {
+                format!("⚽ GOAL! {} scores for {}!", ev_player_index, team_name)
+            }
+            protocol::EventType::Shot => {
+                format!("Shot by player {}", ev_player_index)
+            }
+            protocol::EventType::ShotOnTarget => {
+                format!("Shot on target!")
+            }
+            protocol::EventType::Save => format!("Great save!"),
+            protocol::EventType::Miss => format!("Shot wide"),
+            protocol::EventType::Foul => format!("Foul committed"),
+            protocol::EventType::HalfTime => "Half Time!".into(),
+            protocol::EventType::FullTime => "Full Time!".into(),
+            protocol::EventType::Corner => format!("Corner kick"),
+            protocol::EventType::YellowCard => {
+                format!("Yellow card for {}", team_name)
+            }
+            protocol::EventType::RedCard => {
+                format!("🔴 RED CARD for {}", team_name)
+            }
+            protocol::EventType::Substitution => {
+                format!("Substitution for {}", team_name)
+            }
+            _ => return, // Skip unknown events
+        };
+
+        self.match_log.push(msg);
+        if self.match_log.len() > 100 {
+            self.match_log.remove(0);
+        }
     }
 }
 

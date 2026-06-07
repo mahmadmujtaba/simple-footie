@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::network::InboundCommand;
+use crate::network::{EventSender, InboundCommand};
 use crate::token::TokenManager;
 
 /// A match in the simulation loop: state + squads + client address.
@@ -42,16 +42,22 @@ pub struct SimulationCore {
     /// Seconds between simulation ticks (idle matches simulate 1 minute per tick)
     tick_interval: Duration,
     events_out: Vec<EventPacket>,
+    event_sender: Option<EventSender>,
 }
 
 impl SimulationCore {
-    pub fn new(cmd_rx: Receiver<InboundCommand>, tokens: TokenManager) -> Self {
+    pub fn new(
+        cmd_rx: Receiver<InboundCommand>,
+        tokens: TokenManager,
+        event_sender: Option<EventSender>,
+    ) -> Self {
         Self {
             cmd_rx,
             tokens,
             matches: HashMap::new(),
             tick_interval: Duration::from_secs(1),
             events_out: Vec::new(),
+            event_sender,
         }
     }
 
@@ -227,15 +233,29 @@ impl SimulationCore {
             }
         }
 
+        // Send events to clients
+        if let Some(ref sender) = self.event_sender {
+            // Group events by match_id
+            let mut events_by_match: std::collections::HashMap<u32, Vec<EventPacket>> =
+                std::collections::HashMap::new();
+            for ev in &self.events_out {
+                events_by_match.entry(ev.match_id).or_default().push(*ev);
+            }
+            for (match_id, events) in &events_by_match {
+                if let Some(am) = self.matches.get(match_id) {
+                    if let Some(ref client_addr) = am.client_addr {
+                        let _ = sender.send_batch(events, *client_addr);
+                    }
+                }
+            }
+        }
+        self.events_out.clear();
+
         // Clean up finished matches
         for id in finished {
             self.matches.remove(&id);
             self.tokens.remove(id);
         }
-
-        // Send events to clients (in production, this goes via EventSender)
-        // For now, we just drain the buffer
-        self.events_out.clear();
     }
 }
 
@@ -247,7 +267,7 @@ mod tests {
     fn test_create_and_simulate_match() {
         let (_tx, rx) = crossbeam::channel::bounded(64);
         let tokens = TokenManager::new();
-        let mut core = SimulationCore::new(rx, tokens);
+        let mut core = SimulationCore::new(rx, tokens, None);
 
         let token = core.create_match(1, 80, 75);
         assert!(core.matches.contains_key(&1));
@@ -258,7 +278,7 @@ mod tests {
     fn test_token_caching() {
         let (_tx, rx) = crossbeam::channel::bounded(64);
         let tokens = TokenManager::new();
-        let mut core = SimulationCore::new(rx, tokens);
+        let mut core = SimulationCore::new(rx, tokens, None);
 
         let token = core.create_match(1, 78, 78);
         let state = &core.matches.get(&1).unwrap().state;

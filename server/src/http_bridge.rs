@@ -21,6 +21,7 @@ pub struct HttpState {
     pub match_minute: AtomicU32,
     pub last_events: Mutex<Vec<String>>,
     pub match_active: AtomicU32,
+    pub match_token: Mutex<[u8; 16]>,
 }
 
 impl HttpState {
@@ -30,6 +31,7 @@ impl HttpState {
             match_minute: AtomicU32::new(0),
             last_events: Mutex::new(Vec::new()),
             match_active: AtomicU32::new(1),
+            match_token: Mutex::new([0u8; 16]),
         })
     }
 }
@@ -319,8 +321,17 @@ fn handle_api_match(state: &HttpState) -> String {
         .collect::<Vec<_>>()
         .join(",");
 
+    let token_hex = {
+        let token = state.match_token.lock().unwrap();
+        token
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join("")
+    };
+
     let body = format!(
-        r#"{{"score":[{},{}],"minute":{},"possession":0.5,"active":{},"events":[{}]}}"#,
+        r#"{{"score":[{},{}],"minute":{},"possession":0.5,"active":{},"token":"{}","events":[{}]}}"#,
         score[0],
         score[1],
         state.match_minute.load(Ordering::Relaxed),
@@ -329,6 +340,7 @@ fn handle_api_match(state: &HttpState) -> String {
         } else {
             "false"
         },
+        token_hex,
         events_json
     );
     format!(
