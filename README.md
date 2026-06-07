@@ -1,16 +1,89 @@
-# ⚽ simple-footie — Football Management TUI Game Engine
+# ⚽ simple-footie
+
+**A football management simulation engine in Rust** — built for speed, built for the terminal.
 
 [![CI](https://github.com/mahmadmujtaba/simple-footie/actions/workflows/ci.yml/badge.svg)](https://github.com/mahmadmujtaba/simple-footie/actions/workflows/ci.yml)
-
-A **high-performance, event-driven football simulation engine** written in Rust,
-designed to support **200k+ concurrent matches** on Oracle Cloud Free Tier.
+[![Release](https://img.shields.io/github/v/release/mahmadmujtaba/simple-footie)](https://github.com/mahmadmujtaba/simple-footie/releases)
 
 ---
 
-## Architecture
+## 🎮 Quick Start
+
+### Download the latest release
+
+Grab the latest tarball from the [Releases page](https://github.com/mahmadmujtaba/simple-footie/releases):
+
+```bash
+# Download and extract
+tar xzf simple-footie-x86_64-unknown-linux-gnu.tar.gz
+cd dist
+```
+
+### Option A: Run the HTTP control panel (recommended for trying it out)
+
+```bash
+./simple-footie-server
+```
+
+Then open **http://127.0.0.1:8080** in your browser.
+
+You'll see a dark-themed control panel with:
+- 📊 Live scoreboard (home vs away)
+- 🎯 Tactical buttons — change mentality, press, tempo, width
+- 📜 Real-time match events feed
+- The page auto-refreshes every 2 seconds
+
+### Option B: Run the terminal UI
+
+In another terminal:
+
+```bash
+./simple-footie-tui
+```
+
+Navigate with `Tab` / arrow keys, press `s` to simulate a match, `q` to quit.
+
+### Option C: Metrics
+
+```bash
+curl http://127.0.0.1:9090/metrics
+```
+
+Prometheus-formatted metrics: active matches, command rate, disk usage, etc.
+
+---
+
+## 🖥️ Screens
+
+The TUI has **7 screens** you can navigate with `Tab` and arrow keys:
+
+| Screen | What you see |
+|--------|-------------|
+| **Dashboard** | Upcoming fixtures + news feed |
+| **Squad** | 18 players with Name, Age, Pos, OVR, POT, Nation, Contract, Value. OVR is color-coded (green ≥80, yellow ≥70, red <70) |
+| **Tactics** | 4-4-2 formation diagram + starting XI with assigned roles |
+| **League** | 16-team table with colored positions (green = top 2, yellow = top 4, red = relegation) |
+| **Transfers** | Budget display (£12.5M) + transfer targets with interest % |
+| **Scouting** | 5-region scouting network with progress bars |
+| **Match** | Live score + full text commentary from the engine |
+
+### Controls
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `→` | Next screen |
+| `Shift+Tab` / `←` | Previous screen |
+| `↓` / `j` | Scroll down |
+| `↑` / `k` | Scroll up |
+| `s` | Simulate a match |
+| `q` / `Esc` | Quit |
+
+---
+
+## 🏗️ What's Under the Hood
 
 ```
-fm-rust/
+simple-footie/
 ├── protocol/    # Binary protocol types (10-byte commands, 12-byte events)
 ├── engine/      # Algebraic simulation + SoA match store
 ├── server/      # UDP receiver, persistence, metrics, simulation core
@@ -18,64 +91,22 @@ fm-rust/
 └── docs/        # Architecture & planning docs
 ```
 
-### Crates
+### The Server
 
-| Crate | Role | Status |
-|-------|------|--------|
-| `protocol` | Shared binary types (CommandPacket, EventPacket, MatchState) | ✅ Complete |
-| `engine` | Algebraic simulation, match store, command application | ✅ Complete |
-| `server` | UDP network, token auth, persistence, metrics, sim core | ✅ Phase 2–3 |
-| `tui` | Ratatui terminal client (7 screens, live match sim) | ✅ Prototype |
+The game server listens on UDP `0.0.0.0:9001` and:
 
----
-
-## Quick Start
-
-```bash
-# Run the server (UDP on port 9001)
-make server
-
-# Run the TUI client
-make tui
-
-# Run all tests
-make test
-
-# Build everything in release mode
-make build
-```
-
-### Controls (TUI)
-
-| Key | Action |
-|-----|--------|
-| `Tab` / `→` | Next screen |
-| `Shift+Tab` / `←` | Previous screen |
-| `s` | Simulate a match |
-| `q` / `Esc` | Quit |
-
-### Screens
-
-- **Dashboard** — Upcoming fixtures + news feed
-- **Squad** — 18-player table with color-coded OVR ratings
-- **Tactics** — 4-4-2 formation + starting XI with roles
-- **League** — 16-team table with colored positions
-- **Transfers** — Budget + transfer targets with interest %
-- **Scouting** — 5-region scouting network
-- **Match** — Live score + commentary from engine simulation
-
----
-
-## Server
-
-The server listens on UDP `0.0.0.0:9001`. It:
-
-- **Receives** 10-byte commands (steady-state) or 26-byte handshakes (with 128-bit token)
-- **Authenticates** every command against per-match tokens
+- **Authenticates** every command with 128-bit tokens
 - **Rate limits** to 2 commands/sec per match
-- **Simulates** matches using the algebraic engine (2 match-min per real second)
-- **Persists** state via write-ahead journal + snapshots (every 5 min)
-- **Exposes** Prometheus metrics on `localhost:9090/metrics`
+- **Simulates** matches at 2 match-minutes per real second
+- **Persists** state via write-ahead journal + CRC32C-checked snapshots
+- **Exposes** Prometheus metrics on localhost:9090
+
+### The Engine
+
+The algebraic simulation is **deterministic** — same inputs always produce the same match. No physics, just probability formulas for:
+- Possession (based on midfield strength + tactic modifiers)
+- Shots, shots on target, saves, goals
+- Fouls and events
 
 ### Binary Protocol
 
@@ -87,16 +118,44 @@ The server listens on UDP `0.0.0.0:9001`. It:
 
 ---
 
-## Phase 3 — Persistence
+## 🔧 Build from Source
 
-- **Journal**: Append-only write-ahead log with 64 KB batching + CRC32C checksums
-- **Snapshots**: Full state dump every 5 minutes, atomic rename
-- **Recovery**: Load latest snapshot + replay journal ≥ last sequence
-- **Metrics**: Prometheus endpoint tracking active matches, command rate, disk usage
+If you have Rust installed:
+
+```bash
+git clone git@github.com:mahmadmujtaba/simple-footie.git
+cd simple-footie
+make build        # Build everything
+make server       # Run the game server
+make tui          # Run the TUI client
+make test         # Run all 25 tests
+```
+
+Or using Cargo directly:
+
+```bash
+cargo run --release -p server    # Game server
+cargo run --release -p tui       # Terminal UI
+cargo test                       # All tests
+```
+
+### Makefile targets
+
+| Command | What it does |
+|---------|-------------|
+| `make build` | Build all crates in release mode |
+| `make server` | Run the game server (UDP 9001) |
+| `make tui` | Run the TUI client |
+| `make test` | Run all 25 tests |
+| `make check` | Fast compilation check |
+| `make lint` | Run clippy |
+| `make fmt` | Format code |
+| `make clean` | Clean build artifacts |
+| `make help` | Show all targets |
 
 ---
 
-## Performance Targets
+## 📊 Performance Targets
 
 | Metric | Target |
 |--------|--------|
@@ -104,18 +163,34 @@ The server listens on UDP `0.0.0.0:9001`. It:
 | Memory per match | ~80 bytes |
 | Command latency (P99) | <2 ms |
 | Recovery time | <10 sec |
-| CPU at idle | 3–5% (keepalive) |
+| CPU at idle | 3–5% |
 
 ---
 
-## Contributing
+## 📦 Releases
+
+We use [GitHub Releases](https://github.com/mahmadmujtaba/simple-footie/releases) with automatic binary builds triggered by version tags (`v*.*.*`).
+
+Each release includes:
+- Pre-built Linux x86_64 binaries (`simple-footie-server`, `simple-footie-tui`)
+- Auto-generated changelog from commit history
+- README included in the tarball
+
+### Versioning
+
+We follow **semantic versioning**:
+- `v0.1.x` — Alpha releases (current)
+- `v0.x.0` — Beta milestones
+- `v1.0.0` — Stable release
+
+---
+
+## 🤝 Contributing
 
 We use a **feature branch workflow** with **squash merges** to `main`.
 
-### Workflow
-
 ```bash
-# 1. Create a feature branch from main
+# 1. Create a feature branch
 git checkout -b feat/my-feature
 
 # 2. Make changes and commit
@@ -124,10 +199,10 @@ git commit -m "feat: add my feature"
 
 # 3. Push and open a Pull Request
 git push -u origin feat/my-feature
-# → Open PR on github.com/mahmadmujtaba/simple-footie
+# → Open PR at github.com/mahmadmujtaba/simple-footie
 
 # 4. After review, squash-merge via GitHub UI
-#    (automatic: delete branch on merge, squash commit)
+#    (branch auto-deletes, CI required, 1 review required)
 ```
 
 ### Rules
@@ -150,6 +225,6 @@ The `build-and-test` workflow runs on every push/PR:
 
 ---
 
-## License
+## 📄 License
 
 MIT
