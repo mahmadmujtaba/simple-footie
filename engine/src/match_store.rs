@@ -6,13 +6,6 @@
 
 use protocol::MatchState;
 
-/// Lookup entry for the match store.
-#[derive(Debug, Clone, Copy)]
-struct Entry {
-    index: u32,
-    generation: u32,
-}
-
 /// SoA match store.
 ///
 /// In production this will use `DashMap` for concurrent access.
@@ -43,16 +36,14 @@ impl MatchStore {
         state.rng_seed = self.total_created;
         self.total_created += 1;
 
-        let index = if let Some(free) = self.free_list.pop() {
+        if let Some(free) = self.free_list.pop() {
             self.states[free as usize] = Some(state);
             free
         } else {
             let idx = self.states.len() as u32;
             self.states.push(Some(state));
             idx
-        };
-
-        index
+        }
     }
 
     /// Get a mutable reference to a match state by index.
@@ -117,7 +108,7 @@ mod tests {
     fn test_remove_and_recycle() {
         let mut store = MatchStore::with_capacity(10);
         let idx1 = store.insert(make_test_match(1));
-        let idx2 = store.insert(make_test_match(2));
+        let _idx2 = store.insert(make_test_match(2));
         assert_eq!(store.active_count(), 2);
 
         store.remove(idx1);

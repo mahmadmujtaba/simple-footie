@@ -22,7 +22,6 @@ use metrics::{start_metrics_server, Metrics};
 use network::NetworkReceiver;
 use simulation_core::SimulationCore;
 use std::path::Path;
-use std::sync::Arc;
 use std::thread;
 use token::TokenManager;
 
@@ -77,7 +76,7 @@ fn main() {
 
     // ── Network receiver (would go on Core 0) ───────────────────
     let net_cmd_tx = cmd_tx.clone();
-    let metrics_clone = metrics.clone();
+    let _metrics_clone = metrics.clone();
     let net_handle = thread::spawn(move || {
         let mut receiver =
             NetworkReceiver::bind("0.0.0.0:9001", net_cmd_tx).expect("Failed to bind UDP socket");

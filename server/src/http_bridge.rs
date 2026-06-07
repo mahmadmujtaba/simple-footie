@@ -8,11 +8,10 @@
 use crossbeam::channel::Sender;
 use protocol::{CommandPacket, CommandType};
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 
 use crate::network::InboundCommand;
 
@@ -408,8 +407,8 @@ fn parse_json_value(body: &str, key: &str) -> Option<u32> {
         let after_key = &body[start + search.len()..];
         // Skip colon, whitespace
         let after_colon = after_key.trim_start();
-        if after_colon.starts_with(':') {
-            let after_colon = after_colon[1..].trim_start();
+        if let Some(stripped) = after_colon.strip_prefix(':') {
+            let after_colon = stripped.trim_start();
             let mut num_str = String::new();
             for c in after_colon.chars() {
                 if c.is_ascii_digit() || c == '-' {
@@ -427,7 +426,6 @@ fn parse_json_value(body: &str, key: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossbeam::channel;
 
     #[test]
     fn test_parse_json_value() {

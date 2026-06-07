@@ -618,9 +618,8 @@ impl App {
         let mut lines: Vec<Line> = regions
             .iter()
             .map(|(region, scouts)| {
-                let progress = std::iter::repeat("▓")
-                    .take(*scouts)
-                    .chain(std::iter::repeat("░").take(5 - scouts))
+                let progress = std::iter::repeat_n("▓", *scouts)
+                    .chain(std::iter::repeat_n("░", 5 - scouts))
                     .collect::<String>();
                 Line::from(Span::styled(
                     format!(

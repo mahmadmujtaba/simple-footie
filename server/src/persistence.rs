@@ -15,6 +15,8 @@
 //! 1. Load latest snapshot → reconstruct active match states.
 //! 2. Replay journal entries with sequence > snapshot's last_sequence.
 
+#![allow(dead_code)]
+
 use crc32c::crc32c;
 use protocol::CommandPacket;
 use std::fs::{self, File, OpenOptions};
@@ -74,7 +76,6 @@ impl Journal {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
-            .write(true)
             .read(true)
             .open(&journal_path)?;
 

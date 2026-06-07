@@ -3,6 +3,8 @@
 //! Core 0: `recv_mmsg` loop, packet validation, push to lock-free command queue.
 //! Core 2: batched event sending via UDP.
 
+#![allow(dead_code)]
+
 use crossbeam::channel::Sender;
 use protocol::{CommandPacket, EventPacket};
 use std::net::UdpSocket;

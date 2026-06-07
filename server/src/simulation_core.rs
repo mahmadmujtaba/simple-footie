@@ -1,6 +1,8 @@
 //! Simulation core — runs on Core 3, drains command queue, applies commands,
 //! runs batch simulation, generates events.
 
+#![allow(dead_code)]
+
 use crossbeam::channel::Receiver;
 use engine::commands::apply_command;
 use engine::player::generate_synthetic_squad;

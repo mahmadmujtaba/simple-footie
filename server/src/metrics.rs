@@ -11,7 +11,7 @@
 //! - `match_minutes_simulated` – total match-minutes simulated
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -63,7 +63,7 @@ pub fn start_metrics_server(metrics: Arc<Metrics>) -> thread::JoinHandle<()> {
                     let mut buf = [0u8; 1024];
                     if let Ok(n) = stream.read(&mut buf) {
                         let request = String::from_utf8_lossy(&buf[..n]);
-                        let now = SystemTime::now()
+                        let _now = SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs();
