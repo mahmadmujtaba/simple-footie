@@ -6,10 +6,12 @@
 //! - Deterministic: seeded with (match_id, token), replayable.
 //! - Minimal state: ~80 bytes per match.
 
+pub mod commands;
 pub mod match_store;
 pub mod player;
 pub mod simulation;
 
+pub use commands::{apply_command, CommandError};
 pub use match_store::MatchStore;
 pub use player::PlayerAttributes;
-pub use simulation::{simulate_match, MatchResult, SimEvent};
+pub use simulation::{simulate_minutes, MatchResult, SimEvent};

@@ -29,30 +29,40 @@ pub struct SimEvent {
     pub value: f32,
 }
 
-/// Simulate a full match given initial state and both squads.
+/// Simulate a match for a specified number of minutes.
 ///
-/// Returns the final `MatchState` plus a chronological list of events.
-pub fn simulate_match(
+/// Supports batch catch-up: pass `minutes` = 90 for a full match,
+/// or fewer to simulate forward from the current state. The simulation
+/// uses the RNG seeded from state.rng_seed, so results are deterministic.
+///
+/// In event-driven mode, the caller invokes this with `minutes = 0` on each
+/// tick (nothing happens until a command arrives). For catch-up after a
+/// user returns from idle, pass the number of elapsed minutes.
+pub fn simulate_minutes(
     mut state: MatchState,
     home_squad: [PlayerAttributes; 11],
     away_squad: [PlayerAttributes; 11],
+    minutes: u8,
 ) -> MatchResult {
     // Deterministic RNG from match state seed
     let mut rng = StdRng::seed_from_u64(state.rng_seed);
     let mut events: Vec<SimEvent> = Vec::with_capacity(64);
 
-    // Kickoff
-    events.push(SimEvent {
-        minute: 0,
-        event_type: EventType::Kickoff,
-        team: Team::Home,
-        player_index: 0,
-        value: 0.0,
-    });
+    // Only emit kickoff if match hasn't started yet
+    if state.minute == 0 {
+        events.push(SimEvent {
+            minute: 0,
+            event_type: EventType::Kickoff,
+            team: Team::Home,
+            player_index: 0,
+            value: 0.0,
+        });
+    }
 
-    // Simulate minute by minute (skip some minutes for performance — sample every 3)
-    // In production this would be event-driven; for simulation we run full 90.
-    for minute in 1..=90 {
+    let end_minute = (state.minute + minutes).min(90);
+
+    // Simulate from current minute to end minute
+    for minute in (state.minute + 1)..=end_minute {
         state.minute = minute;
 
         // --- Possession ---

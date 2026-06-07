@@ -35,6 +35,21 @@ pub enum CommandType {
     Width = 4,
 }
 
+impl TryFrom<u8> for CommandType {
+    type Error = ();
+
+    fn try_from(val: u8) -> Result<Self, Self::Error> {
+        match val {
+            0 => Ok(CommandType::Mentality),
+            1 => Ok(CommandType::Substitution),
+            2 => Ok(CommandType::Press),
+            3 => Ok(CommandType::Tempo),
+            4 => Ok(CommandType::Width),
+            _ => Err(()),
+        }
+    }
+}
+
 /// Mentality values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]

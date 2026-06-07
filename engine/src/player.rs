@@ -50,8 +50,11 @@ impl Position {
     }
 }
 
+/// Convenience alias for an 11-player squad.
+pub type PlayerAttributesArray = [PlayerAttributes; 11];
+
 /// Generate a synthetic squad of 11 players for testing.
-pub fn generate_synthetic_squad(team: Team, base_overall: u8) -> [PlayerAttributes; 11] {
+pub fn generate_synthetic_squad(team: Team, base_overall: u8) -> PlayerAttributesArray {
     let positions = [
         (Position::Goalkeeper, 0),
         (Position::Defender, 1),

@@ -1,7 +1,7 @@
 use color_eyre::eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use engine::player::{generate_synthetic_squad, PlayerAttributes, Position};
-use engine::simulation::simulate_match;
+use engine::player::generate_synthetic_squad;
+use engine::simulation::simulate_minutes;
 use protocol::{MatchState, TacticState, Team};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -157,7 +157,7 @@ impl App {
         let home = generate_synthetic_squad(Team::Home, 78);
         let away = generate_synthetic_squad(Team::Away, 75);
 
-        let result = simulate_match(state, home, away);
+        let result = simulate_minutes(state, home, away, 90);
 
         self.match_score = result.state.score;
 
