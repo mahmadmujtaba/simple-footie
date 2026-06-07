@@ -1,4 +1,6 @@
-# ⚽ fm-rust — Football Management TUI Game Engine
+# ⚽ simple-footie — Football Management TUI Game Engine
+
+[![CI](https://github.com/mahmadmujtaba/simple-footie/actions/workflows/ci.yml/badge.svg)](https://github.com/mahmadmujtaba/simple-footie/actions/workflows/ci.yml)
 
 A **high-performance, event-driven football simulation engine** written in Rust,
 designed to support **200k+ concurrent matches** on Oracle Cloud Free Tier.
@@ -103,6 +105,48 @@ The server listens on UDP `0.0.0.0:9001`. It:
 | Command latency (P99) | <2 ms |
 | Recovery time | <10 sec |
 | CPU at idle | 3–5% (keepalive) |
+
+---
+
+## Contributing
+
+We use a **feature branch workflow** with **squash merges** to `main`.
+
+### Workflow
+
+```bash
+# 1. Create a feature branch from main
+git checkout -b feat/my-feature
+
+# 2. Make changes and commit
+git add .
+git commit -m "feat: add my feature"
+
+# 3. Push and open a Pull Request
+git push -u origin feat/my-feature
+# → Open PR on github.com/mahmadmujtaba/simple-footie
+
+# 4. After review, squash-merge via GitHub UI
+#    (automatic: delete branch on merge, squash commit)
+```
+
+### Rules
+
+- ✅ **Squash merge only** — no merge commits or rebase merges
+- ✅ **Branch protection** — `main` requires passing CI + 1 review
+- ✅ **CI must pass** — `build-and-test` workflow runs on every PR
+- ✅ **Delete branch on merge** — keeps the repo clean
+- ✅ **Feature branches only** — never commit directly to `main`
+
+### CI Pipeline
+
+The `build-and-test` workflow runs on every push/PR:
+
+1. **Format check** — `cargo fmt --check`
+2. **Lint** — `cargo clippy -- -D warnings`
+3. **Build** — `cargo build --release --workspace`
+4. **Test** — `cargo test --release --workspace`
+5. **Binary sizes** — reports `server` and `tui` sizes
 
 ---
 

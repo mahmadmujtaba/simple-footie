@@ -6,3 +6,12 @@ members = [
     "tui",
 ]
 resolver = "2"
+
+[workspace.package]
+name = "simple-footie"
+version = "0.1.0"
+edition = "2021"
+authors = ["M Ahmad Mujtaba"]
+license = "MIT"
+description = "A football management simulation engine in Rust"
+repository = "https://github.com/mahmadmujtaba/simple-footie"
