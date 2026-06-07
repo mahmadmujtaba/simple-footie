@@ -9,25 +9,53 @@
 //! For now: single-threaded demo mode. Multi-core isolation comes after
 //! the basic loop is validated.
 
+mod metrics;
 mod network;
+mod persistence;
 mod simulation_core;
 mod token;
 
 use crossbeam::channel;
+use metrics::{start_metrics_server, Metrics};
 use network::NetworkReceiver;
 use simulation_core::SimulationCore;
+use std::path::Path;
+use std::sync::Arc;
 use std::thread;
 use token::TokenManager;
 
 fn main() {
-    println!("⚽ fm-rust server — Phase 2");
-    println!("Listening on UDP 0.0.0.0:9001\n");
+    println!("⚽ fm-rust server — Phase 3");
+    println!("Listening on UDP 0.0.0.0:9001");
+    println!("Metrics on http://127.0.0.1:9090/metrics");
+    println!("Data directory: ./data/\n");
 
     // ── Channels ────────────────────────────────────────────────
     let (cmd_tx, cmd_rx) = channel::bounded::<network::InboundCommand>(1024);
 
     // ── Token manager (shared state, thread-safe) ───────────────
     let tokens = TokenManager::new();
+
+    // ── Metrics ─────────────────────────────────────────────────
+    let metrics = Metrics::new();
+    metrics
+        .active_matches
+        .store(1, std::sync::atomic::Ordering::Relaxed);
+    let _metrics_handle = start_metrics_server(metrics.clone());
+
+    // ── Persistence (journal + snapshots) ───────────────────────
+    let data_dir = Path::new("./data");
+    let mut journal = persistence::Journal::open(data_dir).expect("Failed to open journal");
+
+    // Check disk space on startup
+    match journal.check_disk_space() {
+        Ok(true) => println!("  Disk space: OK"),
+        Ok(false) => {
+            eprintln!("  ⚠  Disk <5% free — journaling disabled");
+            journal.disable();
+        }
+        Err(e) => eprintln!("  ⚠  Failed to check disk space: {e}"),
+    }
 
     // ── Simulation core ─────────────────────────────────────────
     let mut sim_core = SimulationCore::new(cmd_rx, tokens);
@@ -42,6 +70,7 @@ fn main() {
 
     // ── Network receiver (would go on Core 0) ───────────────────
     let net_cmd_tx = cmd_tx.clone();
+    let metrics_clone = metrics.clone();
     let net_handle = thread::spawn(move || {
         let mut receiver =
             NetworkReceiver::bind("0.0.0.0:9001", net_cmd_tx).expect("Failed to bind UDP socket");
@@ -50,11 +79,13 @@ fn main() {
     });
 
     // ── Run simulation on main thread (Core 3) ──────────────────
-    println!("  Simulation core running. Send commands via UDP to port 9001.\n");
-    println!("  Commands: 10 bytes (steady-state) or 26 bytes (handshake)\n");
+    println!("  Simulation core running. Send commands via UDP to port 9001.");
+    println!("  Metrics: curl http://127.0.0.1:9090/metrics\n");
+
+    // In production, sim_core.run() would be wrapped to journal commands
+    // and take snapshots. For now, sim_core.run() loops forever.
     sim_core.run();
 
-    // (Unreachable: sim_core.run() loops forever)
     let _ = net_handle.join();
 }
 
