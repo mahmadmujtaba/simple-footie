@@ -1,0 +1,12 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine = { path = "../engine" }
+protocol = { path = "../protocol" }
+tokio = { version = "1", features = ["full"] }
+dashmap = "6"
+crossbeam = "0.8"
+getrandom = "0.2"
