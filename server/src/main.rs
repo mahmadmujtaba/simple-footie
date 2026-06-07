@@ -9,6 +9,7 @@
 //! For now: single-threaded demo mode. Multi-core isolation comes after
 //! the basic loop is validated.
 
+mod http_bridge;
 mod metrics;
 mod network;
 mod persistence;
@@ -16,6 +17,7 @@ mod simulation_core;
 mod token;
 
 use crossbeam::channel;
+use http_bridge::{start_http_bridge, HttpState};
 use metrics::{start_metrics_server, Metrics};
 use network::NetworkReceiver;
 use simulation_core::SimulationCore;
@@ -42,6 +44,11 @@ fn main() {
         .active_matches
         .store(1, std::sync::atomic::Ordering::Relaxed);
     let _metrics_handle = start_metrics_server(metrics.clone());
+
+    // ── HTTP Bridge (control panel on port 8080) ────────────────
+    let http_state = HttpState::new();
+    let _http_handle = start_http_bridge(cmd_tx.clone(), http_state.clone());
+    println!("  Control panel: http://127.0.0.1:8080");
 
     // ── Persistence (journal + snapshots) ───────────────────────
     let data_dir = Path::new("./data");
