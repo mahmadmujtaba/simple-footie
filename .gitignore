@@ -13,5 +13,13 @@ Thumbs.db
 *.swp
 *.swo
 
+# Build
+/dist
+*.tar.gz
+
 # Logs
 *.log
+
+# Data
+data/
+!data/.gitkeep
