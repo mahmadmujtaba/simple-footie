@@ -133,6 +133,12 @@ pub enum EventType {
     Injury = 13,
     Offside = 14,
     Miss = 15,
+    PenaltyGoal = 16,
+    PenaltyMiss = 17,
+    PenaltySave = 18,
+    ExtraTimeStart = 19,
+    ExtraTimeHalfTime = 20,
+    PenaltyShootoutStart = 21,
 }
 
 /// Team identifier.
@@ -196,4 +202,29 @@ pub struct MatchState {
 
 impl MatchState {
     pub const SIZE: usize = 4 + 16 + 2 + 2 + 1 + 4 + 8 + 4 + 8;
+}
+
+/// Format the match minute (0-135) into a standard football display string.
+pub fn format_match_minute(minute: u8) -> String {
+    if minute == 0 {
+        "0'".into()
+    } else if minute <= 45 {
+        format!("{}'", minute)
+    } else if minute <= 50 {
+        format!("45+{}'", minute - 45)
+    } else if minute <= 95 {
+        format!("{}'", minute - 5)
+    } else if minute <= 100 {
+        format!("90+{}'", minute - 95)
+    } else if minute <= 115 {
+        format!("{}'", 90 + (minute - 100))
+    } else if minute <= 117 {
+        format!("105+{}'", minute - 115)
+    } else if minute <= 132 {
+        format!("{}'", 105 + (minute - 117))
+    } else if minute <= 135 {
+        format!("120+{}'", minute - 132)
+    } else {
+        "120'".into()
+    }
 }

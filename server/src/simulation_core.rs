@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 use crate::network::{EventSender, InboundCommand};
 use crate::token::TokenManager;
+use crate::http_bridge::HttpState;
+use std::sync::Arc;
 
 /// A match in the simulation loop: state + squads + client address.
 struct ActiveMatch {
@@ -43,6 +45,7 @@ pub struct SimulationCore {
     tick_interval: Duration,
     events_out: Vec<EventPacket>,
     event_sender: Option<EventSender>,
+    http_state: Option<Arc<HttpState>>,
 }
 
 impl SimulationCore {
@@ -50,6 +53,7 @@ impl SimulationCore {
         cmd_rx: Receiver<InboundCommand>,
         tokens: TokenManager,
         event_sender: Option<EventSender>,
+        http_state: Option<Arc<HttpState>>,
     ) -> Self {
         Self {
             cmd_rx,
@@ -58,6 +62,7 @@ impl SimulationCore {
             tick_interval: Duration::from_secs(1),
             events_out: Vec::new(),
             event_sender,
+            http_state,
         }
     }
 
@@ -174,8 +179,46 @@ impl SimulationCore {
         };
 
         // Apply the command
-        let _ = apply_command(&mut match_ref.state, &cmd.packet);
-        // Errors (stale sequence, invalid args) are silently dropped per spec
+        if apply_command(&mut match_ref.state, &cmd.packet).is_ok() {
+            if cmd.packet.command_type == protocol::CommandType::Substitution {
+                let team_idx = cmd.packet.arg1 as usize;
+                let player_out_idx = cmd.packet.arg2 as usize;
+                if player_out_idx < 11 {
+                    let team = if team_idx == 0 {
+                        Team::Home
+                    } else {
+                        Team::Away
+                    };
+                    let mut sub = engine::player::PlayerAttributes::default();
+                    sub.index = player_out_idx as u16;
+                    sub.team = team;
+
+                    let old_overall = if team_idx == 0 {
+                        match_ref.home_squad[player_out_idx].overall
+                    } else {
+                        match_ref.away_squad[player_out_idx].overall
+                    };
+
+                    sub.overall = old_overall;
+                    sub.finishing = old_overall.saturating_add(5).min(100);
+                    sub.passing = old_overall.saturating_add(5).min(100);
+                    sub.defending = old_overall.saturating_add(5).min(100);
+                    sub.stamina = 100; // Fresh substitute gets 100 stamina!
+
+                    sub.position = if team_idx == 0 {
+                        match_ref.home_squad[player_out_idx].position
+                    } else {
+                        match_ref.away_squad[player_out_idx].position
+                    };
+
+                    if team_idx == 0 {
+                        match_ref.home_squad[player_out_idx] = sub;
+                    } else {
+                        match_ref.away_squad[player_out_idx] = sub;
+                    }
+                }
+            }
+        }
     }
 
     /// Simulate one minute for all active matches.
@@ -183,8 +226,9 @@ impl SimulationCore {
         let mut finished: Vec<u32> = Vec::new();
 
         for (&match_id, am) in self.matches.iter_mut() {
-            if am.state.minute >= 90 {
-                // Match already finished, optionally clean up
+            // Check if match is already finished
+            let is_finished = engine::simulation::get_next_minute(am.state.minute, am.state.rng_seed, true, am.state.score).is_none();
+            if is_finished {
                 if !finished.contains(&match_id) {
                     finished.push(match_id);
                 }
@@ -193,8 +237,8 @@ impl SimulationCore {
 
             // Calculate elapsed real time and convert to match minutes
             let elapsed = am.last_sim_time.elapsed();
-            let match_minutes = (elapsed.as_secs_f32() * 2.0) as u8; // 2 match min per real sec
-            let minutes = match_minutes.max(1).min(90 - am.state.minute);
+            let match_minutes = (elapsed.as_secs_f32() * 1.0) as u8; // 1 match min per real sec
+            let minutes = match_minutes.max(1);
 
             // Run batch simulation
             let result = simulate_minutes(am.state.clone(), am.home_squad, am.away_squad, minutes);
@@ -214,21 +258,54 @@ impl SimulationCore {
                 });
             }
 
-            if am.state.minute >= 90 {
-                finished.push(match_id);
-                // Emit full time event if not already emitted
-                if !self
-                    .events_out
-                    .iter()
-                    .any(|e| e.match_id == match_id && e.event_type == EventType::FullTime)
-                {
-                    self.events_out.push(EventPacket {
-                        match_id,
-                        event_type: EventType::FullTime,
-                        team: Team::Home,
-                        player_index: 0,
-                        value: 0.0,
-                    });
+            // Update HTTP state if this is match #1
+            if match_id == 1 {
+                if let Some(ref http_state) = self.http_state {
+                    http_state.match_minute.store(am.state.minute as u32, std::sync::atomic::Ordering::Relaxed);
+                    *http_state.match_score.lock().unwrap() = am.state.score;
+                    
+                    // Add new events to http_state.last_events
+                    let mut last_events = http_state.last_events.lock().unwrap();
+                    for ev in &result.events {
+                        let formatted_min = protocol::format_match_minute(ev.minute);
+                        let team_name = match ev.team {
+                            Team::Home => "Rustington",
+                            Team::Away => "FC Terminal",
+                        };
+                        let text = match ev.event_type {
+                            EventType::Kickoff => "Kickoff!".into(),
+                            EventType::Goal => format!("⚽ GOAL! {} scores for {}!", ev.player_index, team_name),
+                            EventType::Shot => format!("Shot by player {}", ev.player_index),
+                            EventType::ShotOnTarget => "Shot on target!".into(),
+                            EventType::Save => "Great save!".into(),
+                            EventType::Corner => "Corner kick".into(),
+                            EventType::FreeKick => "Free kick".into(),
+                            EventType::Foul => "Foul committed".into(),
+                            EventType::YellowCard => format!("Yellow card for {}", team_name),
+                            EventType::RedCard => format!("🔴 RED CARD for {}", team_name),
+                            EventType::Substitution => format!("Substitution for {}", team_name),
+                            EventType::HalfTime => "Half Time!".into(),
+                            EventType::FullTime => "Full Time!".into(),
+                            EventType::Injury => format!("Injury to player {}", ev.player_index),
+                            EventType::Offside => "Offside!".into(),
+                            EventType::Miss => "Shot wide".into(),
+                            EventType::PenaltyGoal => format!("⚽ PENALTY GOAL! {} scores for {}!", ev.player_index, team_name),
+                            EventType::PenaltyMiss => format!("❌ Penalty missed by {}!", team_name),
+                            EventType::PenaltySave => format!("🧤 PENALTY SAVED by {} GK!", team_name),
+                            EventType::ExtraTimeStart => "⏰ EXTRA TIME STARTS!".into(),
+                            EventType::ExtraTimeHalfTime => "⏰ Extra Time Half Time!".into(),
+                            EventType::PenaltyShootoutStart => "🧤 PENALTY SHOOTOUT STARTS!".into(),
+                        };
+                        last_events.push(format!("{}' - {}", formatted_min, text));
+                    }
+                }
+            }
+
+            // Check if match has just finished
+            let is_finished_now = engine::simulation::get_next_minute(am.state.minute, am.state.rng_seed, true, am.state.score).is_none();
+            if is_finished_now {
+                if !finished.contains(&match_id) {
+                    finished.push(match_id);
                 }
             }
         }
@@ -267,7 +344,7 @@ mod tests {
     fn test_create_and_simulate_match() {
         let (_tx, rx) = crossbeam::channel::bounded(64);
         let tokens = TokenManager::new();
-        let mut core = SimulationCore::new(rx, tokens, None);
+        let mut core = SimulationCore::new(rx, tokens, None, None);
 
         let token = core.create_match(1, 80, 75);
         assert!(core.matches.contains_key(&1));
@@ -278,7 +355,7 @@ mod tests {
     fn test_token_caching() {
         let (_tx, rx) = crossbeam::channel::bounded(64);
         let tokens = TokenManager::new();
-        let mut core = SimulationCore::new(rx, tokens, None);
+        let mut core = SimulationCore::new(rx, tokens, None, None);
 
         let token = core.create_match(1, 78, 78);
         let state = &core.matches.get(&1).unwrap().state;

@@ -117,6 +117,7 @@ struct App {
     messages: Vec<String>,
     match_log: Vec<String>,
     match_score: [u8; 2],
+    match_minute: u8,
     connected: bool,
     server_client: Option<ServerClient>,
     seq: u16,
@@ -142,6 +143,7 @@ impl App {
             ],
             match_log: vec![],
             match_score: [0, 0],
+            match_minute: 0,
             connected: false,
             server_client: None,
             seq: 0,
@@ -184,9 +186,10 @@ impl App {
         let home = generate_synthetic_squad(Team::Home, 78);
         let away = generate_synthetic_squad(Team::Away, 75);
 
-        let result = simulate_minutes(state, home, away, 90);
+        let result = simulate_minutes(state, home, away, 135); // Simulate full potential match including extra time/penalties
 
         self.match_score = result.state.score;
+        self.match_minute = result.state.minute;
 
         self.match_log.clear();
         self.match_log.push("=== Match Report ===".into());
@@ -203,33 +206,69 @@ impl App {
         self.match_log.push("--- Events ---".into());
 
         for ev in &result.events {
+            let formatted_min = protocol::format_match_minute(ev.minute);
+            let team_name = match ev.team {
+                Team::Home => "Rustington",
+                Team::Away => "FC Terminal",
+            };
             match ev.event_type {
-                protocol::EventType::Kickoff => self.match_log.push("Kickoff!".into()),
+                protocol::EventType::Kickoff => self.match_log.push(format!("{} - Kickoff!", formatted_min)),
                 protocol::EventType::Goal => {
-                    let team_name = match ev.team {
-                        Team::Home => "Rustington",
-                        Team::Away => "FC Terminal",
-                    };
                     self.match_log.push(format!(
-                        "⚽ GOAL! {} scores for {}!",
-                        ev.player_index, team_name
+                        "{} - ⚽ GOAL! {} scores for {}!",
+                        formatted_min, ev.player_index, team_name
                     ));
                 }
                 protocol::EventType::Shot => self.match_log.push(format!(
-                    "{}' - Shot by player {}",
-                    ev.minute, ev.player_index
+                    "{} - Shot by player {}",
+                    formatted_min, ev.player_index
+                )),
+                protocol::EventType::ShotOnTarget => self.match_log.push(format!(
+                    "{} - Shot on target!",
+                    formatted_min
                 )),
                 protocol::EventType::Save => {
-                    self.match_log.push(format!("{}' - Great save!", ev.minute))
+                    self.match_log.push(format!("{} - Great save!", formatted_min))
                 }
                 protocol::EventType::Miss => {
-                    self.match_log.push(format!("{}' - Shot wide", ev.minute))
+                    self.match_log.push(format!("{} - Shot wide", formatted_min))
                 }
                 protocol::EventType::Foul => self
                     .match_log
-                    .push(format!("{}' - Foul committed", ev.minute)),
-                protocol::EventType::FullTime => self.match_log.push("Full Time!".into()),
-                _ => {}
+                    .push(format!("{} - Foul committed", formatted_min)),
+                protocol::EventType::Corner => self.match_log.push(format!("{} - Corner kick", formatted_min)),
+                protocol::EventType::FreeKick => self.match_log.push(format!("{} - Free kick", formatted_min)),
+                protocol::EventType::YellowCard => self.match_log.push(format!("{} - Yellow card for {}", formatted_min, team_name)),
+                protocol::EventType::RedCard => self.match_log.push(format!("{} - 🔴 RED CARD for {}", formatted_min, team_name)),
+                protocol::EventType::Substitution => self.match_log.push(format!("{} - Substitution for {}", formatted_min, team_name)),
+                protocol::EventType::Injury => self.match_log.push(format!("{} - Injury to player {}", formatted_min, ev.player_index)),
+                protocol::EventType::Offside => self.match_log.push(format!("{} - Offside!", formatted_min)),
+                protocol::EventType::HalfTime => self.match_log.push(format!("{} - Half Time!", formatted_min)),
+                protocol::EventType::FullTime => self.match_log.push(format!("{} - Full Time!", formatted_min)),
+                protocol::EventType::PenaltyGoal => self.match_log.push(format!(
+                    "{} - ⚽ PENALTY GOAL! {} scores for {}! Shootout score: {}",
+                    formatted_min, ev.player_index, team_name, ev.value as u32
+                )),
+                protocol::EventType::PenaltyMiss => self.match_log.push(format!(
+                    "{} - ❌ Penalty missed by {}!",
+                    formatted_min, team_name
+                )),
+                protocol::EventType::PenaltySave => self.match_log.push(format!(
+                    "{} - 🧤 PENALTY SAVED by {} GK!",
+                    formatted_min, team_name
+                )),
+                protocol::EventType::ExtraTimeStart => self.match_log.push(format!(
+                    "{} - ⏰ EXTRA TIME STARTS! 30 more minutes will be played.",
+                    formatted_min
+                )),
+                protocol::EventType::ExtraTimeHalfTime => self.match_log.push(format!(
+                    "{} - ⏰ Extra Time Half Time!",
+                    formatted_min
+                )),
+                protocol::EventType::PenaltyShootoutStart => self.match_log.push(format!(
+                    "{} - 🧤 PENALTY SHOOTOUT STARTS!",
+                    formatted_min
+                )),
             }
         }
     }
@@ -717,6 +756,7 @@ impl App {
             .split(area);
 
         // Scoreboard
+        let formatted_minute = protocol::format_match_minute(self.match_minute);
         let scoreboard = Paragraph::new(Text::from(vec![
             Line::from(Span::styled(
                 " ⚽ LIVE MATCH",
@@ -724,8 +764,8 @@ impl App {
             )),
             Line::from(Span::styled(
                 format!(
-                    "   Rustington United {} - {} FC Terminal",
-                    self.match_score[0], self.match_score[1]
+                    "   Rustington United {} - {} FC Terminal  (Minute: {})",
+                    self.match_score[0], self.match_score[1], formatted_minute
                 ),
                 Style::default()
                     .bold()
@@ -790,12 +830,16 @@ impl App {
 
     fn process_server_event(&mut self, event: protocol::EventPacket) {
         // Safely unpack fields from the packed struct to avoid UB on u32/u16/f32
-        let (_mid, ev_type, ev_team, ev_player_index, _val) = event.unpack();
+        let (_mid, ev_type, ev_team, ev_player_index, val) = event.unpack();
 
         let team_name = match ev_team {
             protocol::Team::Home => "Rustington",
             protocol::Team::Away => "FC Terminal",
         };
+
+        // Update match minute
+        self.match_minute = val as u8;
+        let formatted_min = protocol::format_match_minute(self.match_minute);
 
         // Update score for goals
         if ev_type == protocol::EventType::Goal {
@@ -808,30 +852,48 @@ impl App {
 
         // Add to match log
         let msg = match ev_type {
-            protocol::EventType::Kickoff => "Kickoff!".into(),
+            protocol::EventType::Kickoff => format!("{} - Kickoff!", formatted_min),
             protocol::EventType::Goal => {
-                format!("⚽ GOAL! {} scores for {}!", ev_player_index, team_name)
+                format!("{} - ⚽ GOAL! {} scores for {}!", formatted_min, ev_player_index, team_name)
             }
             protocol::EventType::Shot => {
-                format!("Shot by player {}", ev_player_index)
+                format!("{} - Shot by player {}", formatted_min, ev_player_index)
             }
             protocol::EventType::ShotOnTarget => {
-                format!("Shot on target!")
+                format!("{} - Shot on target!", formatted_min)
             }
-            protocol::EventType::Save => format!("Great save!"),
-            protocol::EventType::Miss => format!("Shot wide"),
-            protocol::EventType::Foul => format!("Foul committed"),
-            protocol::EventType::HalfTime => "Half Time!".into(),
-            protocol::EventType::FullTime => "Full Time!".into(),
-            protocol::EventType::Corner => format!("Corner kick"),
+            protocol::EventType::Save => format!("{} - Great save!", formatted_min),
+            protocol::EventType::Miss => format!("{} - Shot wide", formatted_min),
+            protocol::EventType::Foul => format!("{} - Foul committed", formatted_min),
+            protocol::EventType::HalfTime => format!("{} - Half Time!", formatted_min),
+            protocol::EventType::FullTime => format!("{} - Full Time!", formatted_min),
+            protocol::EventType::Corner => format!("{} - Corner kick", formatted_min),
             protocol::EventType::YellowCard => {
-                format!("Yellow card for {}", team_name)
+                format!("{} - Yellow card for {}", formatted_min, team_name)
             }
             protocol::EventType::RedCard => {
-                format!("🔴 RED CARD for {}", team_name)
+                format!("{} - 🔴 RED CARD for {}", formatted_min, team_name)
             }
             protocol::EventType::Substitution => {
-                format!("Substitution for {}", team_name)
+                format!("{} - Substitution for {}", formatted_min, team_name)
+            }
+            protocol::EventType::PenaltyGoal => {
+                format!("{} - ⚽ PENALTY GOAL! {} scores for {}! Shootout score: {}", formatted_min, ev_player_index, team_name, val as u32)
+            }
+            protocol::EventType::PenaltyMiss => {
+                format!("{} - ❌ Penalty missed by {}!", formatted_min, team_name)
+            }
+            protocol::EventType::PenaltySave => {
+                format!("{} - 🧤 PENALTY SAVED by {} GK!", formatted_min, team_name)
+            }
+            protocol::EventType::ExtraTimeStart => {
+                format!("{} - ⏰ EXTRA TIME STARTS! 30 more minutes will be played.", formatted_min)
+            }
+            protocol::EventType::ExtraTimeHalfTime => {
+                format!("{} - ⏰ Extra Time Half Time!", formatted_min)
+            }
+            protocol::EventType::PenaltyShootoutStart => {
+                format!("{} - 🧤 PENALTY SHOOTOUT STARTS!", formatted_min)
             }
             _ => return, // Skip unknown events
         };

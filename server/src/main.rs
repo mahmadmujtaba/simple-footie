@@ -40,8 +40,11 @@ fn main() {
     // ── Event sender (sends events to clients via UDP) ──────────
     let event_sender = EventSender::bind("0.0.0.0:0").expect("Failed to bind event sender");
 
+    // ── HTTP Bridge (control panel on port 8080) ────────────────
+    let http_state = HttpState::new();
+
     // ── Simulation core ─────────────────────────────────────────
-    let mut sim_core = SimulationCore::new(cmd_rx, tokens, Some(event_sender));
+    let mut sim_core = SimulationCore::new(cmd_rx, tokens, Some(event_sender), Some(http_state.clone()));
 
     // Create a demo match so there's something to see
     let token = sim_core.create_match(1, 80, 75);
@@ -51,10 +54,6 @@ fn main() {
         token[0], token[1], token[2]
     );
 
-    // ── HTTP Bridge (control panel on port 8080) ────────────────
-    // Create HttpState AFTER the match token is known, so HTTP clients
-    // see the correct token immediately.
-    let http_state = HttpState::new();
     *http_state.match_token.lock().unwrap() = token;
     let _http_handle = start_http_bridge(cmd_tx.clone(), http_state.clone());
     println!("  Control panel: http://127.0.0.1:8080");

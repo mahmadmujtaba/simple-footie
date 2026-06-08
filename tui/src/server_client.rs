@@ -258,6 +258,12 @@ fn event_type_from_u8(val: u8) -> Option<protocol::EventType> {
         13 => Some(protocol::EventType::Injury),
         14 => Some(protocol::EventType::Offside),
         15 => Some(protocol::EventType::Miss),
+        16 => Some(protocol::EventType::PenaltyGoal),
+        17 => Some(protocol::EventType::PenaltyMiss),
+        18 => Some(protocol::EventType::PenaltySave),
+        19 => Some(protocol::EventType::ExtraTimeStart),
+        20 => Some(protocol::EventType::ExtraTimeHalfTime),
+        21 => Some(protocol::EventType::PenaltyShootoutStart),
         _ => None,
     }
 }

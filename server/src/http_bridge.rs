@@ -330,11 +330,12 @@ fn handle_api_match(state: &HttpState) -> String {
             .join("")
     };
 
+    let formatted_minute = protocol::format_match_minute(state.match_minute.load(Ordering::Relaxed) as u8);
     let body = format!(
-        r#"{{"score":[{},{}],"minute":{},"possession":0.5,"active":{},"token":"{}","events":[{}]}}"#,
+        r#"{{"score":[{},{}],"minute":"{}","possession":0.5,"active":{},"token":"{}","events":[{}]}}"#,
         score[0],
         score[1],
-        state.match_minute.load(Ordering::Relaxed),
+        formatted_minute,
         if state.match_active.load(Ordering::Relaxed) > 0 {
             "true"
         } else {
