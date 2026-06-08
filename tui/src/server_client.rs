@@ -69,7 +69,7 @@ impl ServerClient {
                             let event_len =
                                 u16::from_le_bytes([buf[offset], buf[offset + 1]]) as usize;
                             offset += 2;
-                            if offset + event_len > len || event_len < 12 {
+                            if offset + event_len > len || event_len < 14 {
                                 break;
                             }
                             if let Some(event) =
@@ -209,16 +209,18 @@ fn hex_to_bytes(hex: &str) -> [u8; 16] {
 
 // ── Wire-format parser ─────────────────────────────────────────────
 
-/// Deserialize a single `EventPacket` from raw bytes (at least 12 bytes).
+/// Deserialize a single `EventPacket` from raw bytes (at least 14 bytes).
 ///
 /// Wire layout (little-endian):
 ///   [0..4]   match_id       (u32)
 ///   [4]      event_type     (u8)
 ///   [5]      team           (u8)
 ///   [6..8]   player_index   (u16)
-///   [8..12]  value          (f32)
+///   [8]      minute         (u8)
+///   [9]      unused         (u8)
+///   [10..14] value          (f32)
 fn parse_event_packet(data: &[u8]) -> Option<EventPacket> {
-    if data.len() < 12 {
+    if data.len() < 14 {
         return None;
     }
     let match_id = u32::from_le_bytes(data[0..4].try_into().ok()?);
@@ -229,13 +231,16 @@ fn parse_event_packet(data: &[u8]) -> Option<EventPacket> {
         protocol::Team::Away
     };
     let player_index = u16::from_le_bytes(data[6..8].try_into().ok()?);
-    let value = f32::from_le_bytes(data[8..12].try_into().ok()?);
+    let minute = data[8];
+    let value = f32::from_le_bytes(data[10..14].try_into().ok()?);
 
     Some(EventPacket {
         match_id,
         event_type,
         team,
         player_index,
+        minute,
+        unused: 0,
         value,
     })
 }
@@ -264,6 +269,11 @@ fn event_type_from_u8(val: u8) -> Option<protocol::EventType> {
         19 => Some(protocol::EventType::ExtraTimeStart),
         20 => Some(protocol::EventType::ExtraTimeHalfTime),
         21 => Some(protocol::EventType::PenaltyShootoutStart),
+        22 => Some(protocol::EventType::Pass),
+        23 => Some(protocol::EventType::Tackle),
+        24 => Some(protocol::EventType::Dribble),
+        25 => Some(protocol::EventType::Interception),
+        26 => Some(protocol::EventType::Block),
         _ => None,
     }
 }

@@ -9,6 +9,95 @@ use rand::{Rng, SeedableRng};
 
 use crate::player::PlayerAttributes;
 
+/// Generate a minor event (Pass, Tackle, Dribble, Interception, Block) to show continuous ball progression.
+fn generate_minor_event(
+    minute: u8,
+    rng: &mut StdRng,
+    home_squad: &[PlayerAttributes; 11],
+    away_squad: &[PlayerAttributes; 11],
+    effective_possession: f32,
+) -> SimEvent {
+    let home_has_ball = rng.gen::<f32>() < effective_possession;
+    let (team, _squad, _opp_squad) = if home_has_ball {
+        (Team::Home, home_squad, away_squad)
+    } else {
+        (Team::Away, away_squad, home_squad)
+    };
+
+    let event_roll = rng.gen::<f32>();
+    if event_roll < 0.55 {
+        // Pass (55% chance)
+        let passer_idx = if rng.gen::<f32>() < 0.6 {
+            rng.gen_range(5..=8) // Midfielders pass most often
+        } else {
+            rng.gen_range(1..=10)
+        };
+        SimEvent {
+            minute,
+            event_type: EventType::Pass,
+            team,
+            player_index: passer_idx as u16,
+            value: 0.0,
+        }
+    } else if event_roll < 0.75 {
+        // Dribble (20% chance)
+        let dribbler_idx = if rng.gen::<f32>() < 0.5 {
+            rng.gen_range(9..=10) // Forwards dribble most often
+        } else {
+            rng.gen_range(5..=8)
+        };
+        SimEvent {
+            minute,
+            event_type: EventType::Dribble,
+            team,
+            player_index: dribbler_idx as u16,
+            value: 0.0,
+        }
+    } else if event_roll < 0.85 {
+        // Tackle (10% chance)
+        let opp_team = match team {
+            Team::Home => Team::Away,
+            Team::Away => Team::Home,
+        };
+        let tackler_idx = rng.gen_range(1..=8);
+        SimEvent {
+            minute,
+            event_type: EventType::Tackle,
+            team: opp_team,
+            player_index: tackler_idx as u16,
+            value: 0.0,
+        }
+    } else if event_roll < 0.93 {
+        // Interception (8% chance)
+        let opp_team = match team {
+            Team::Home => Team::Away,
+            Team::Away => Team::Home,
+        };
+        let interceptor_idx = rng.gen_range(1..=8);
+        SimEvent {
+            minute,
+            event_type: EventType::Interception,
+            team: opp_team,
+            player_index: interceptor_idx as u16,
+            value: 0.0,
+        }
+    } else {
+        // Block (7% chance)
+        let opp_team = match team {
+            Team::Home => Team::Away,
+            Team::Away => Team::Home,
+        };
+        let blocker_idx = rng.gen_range(1..=4); // Defenders block
+        SimEvent {
+            minute,
+            event_type: EventType::Block,
+            team: opp_team,
+            player_index: blocker_idx as u16,
+            value: 0.0,
+        }
+    }
+}
+
 /// Full result of a simulated match.
 #[derive(Debug, Clone)]
 pub struct MatchResult {
@@ -417,6 +506,10 @@ pub fn simulate_minutes(
         // Every minute check for potential incidents, typically once per ~3 minutes on average
         let check_chance = 0.33 * match_tempo;
         if rng.gen::<f32>() >= check_chance {
+            // Generate a minor event (Pass, Tackle, Dribble, Interception, Block) to show continuous ball progression
+            let minor_ev = generate_minor_event(minute, &mut rng, &home_squad, &away_squad, effective_possession);
+            events.push(minor_ev);
+            
             // Period end checks even if no event happened
             check_period_ends(minute, t1, t2, t3, t4, &mut events, &mut state, &mut rng, &home_squad, &away_squad);
             continue;
@@ -676,6 +769,9 @@ pub fn simulate_minutes(
         check_period_ends(minute, t1, t2, t3, t4, &mut events, &mut state, &mut rng, &home_squad, &away_squad);
     }
 
+    // Update RNG seed deterministically so the next batch simulation starts with a new seed
+    state.rng_seed = rng.gen::<u64>();
+
     MatchResult {
         state,
         events,
@@ -747,10 +843,3 @@ fn check_period_ends(
     }
 }
 
-    MatchResult {
-        state,
-        events,
-        home_squad,
-        away_squad,
-    }
-}

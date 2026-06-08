@@ -7,6 +7,7 @@
 //! - Minimal state: ~80 bytes per match.
 
 pub mod commands;
+pub mod database;
 pub mod match_store;
 pub mod player;
 pub mod simulation;

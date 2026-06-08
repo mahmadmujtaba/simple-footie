@@ -31,6 +31,13 @@ fn main() {
     println!("Metrics on http://127.0.0.1:9090/metrics");
     println!("Data directory: ./data/\n");
 
+    // Initialize SQLite database
+    if let Err(e) = engine::database::init_db("simple_footie.db") {
+        eprintln!("  ⚠  Failed to initialize SQLite database: {e}");
+    } else {
+        println!("  SQLite Database: Initialized (simple_footie.db)");
+    }
+
     // ── Channels ────────────────────────────────────────────────
     let (cmd_tx, cmd_rx) = channel::bounded::<network::InboundCommand>(1024);
 

@@ -7,7 +7,7 @@ use crossbeam::channel::Receiver;
 use engine::commands::apply_command;
 use engine::player::generate_synthetic_squad;
 use engine::simulation::simulate_minutes;
-use protocol::{EventPacket, EventType, MatchState, Team};
+use protocol::{EventPacket, MatchState, Team};
 use std::collections::HashMap;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -24,6 +24,7 @@ struct ActiveMatch {
     away_squad: engine::player::PlayerAttributesArray,
     client_addr: Option<std::net::SocketAddr>,
     last_sim_time: Instant,
+    events: Vec<engine::database::DbMatchEvent>,
 }
 
 /// Convenience alias for an 11-player squad.
@@ -90,8 +91,10 @@ impl SimulationCore {
             rng_seed: match_id as u64,
         };
 
-        let home_squad = generate_synthetic_squad(Team::Home, home_strength);
-        let away_squad = generate_synthetic_squad(Team::Away, away_strength);
+        let home_squad = engine::database::load_squad_attributes("simple_footie.db", "Home")
+            .unwrap_or_else(|_| generate_synthetic_squad(Team::Home, home_strength));
+        let away_squad = engine::database::load_squad_attributes("simple_footie.db", "Away")
+            .unwrap_or_else(|_| generate_synthetic_squad(Team::Away, away_strength));
 
         self.matches.insert(
             match_id,
@@ -101,6 +104,7 @@ impl SimulationCore {
                 away_squad,
                 client_addr: None,
                 last_sim_time: Instant::now(),
+                events: Vec::new(),
             },
         );
 
@@ -249,11 +253,26 @@ impl SimulationCore {
 
             // Convert SimEvents to EventPackets for network
             for ev in &result.events {
+                let text = protocol::generate_exciting_commentary(ev.event_type, ev.team, ev.player_index, ev.minute, ev.value);
+                am.events.push(engine::database::DbMatchEvent {
+                    minute: ev.minute,
+                    event_type: ev.event_type as u8,
+                    team: match ev.team {
+                        Team::Home => "Home".to_string(),
+                        Team::Away => "Away".to_string(),
+                    },
+                    player_index: ev.player_index,
+                    value: ev.value,
+                    text: text.clone(),
+                });
+
                 self.events_out.push(EventPacket {
                     match_id,
                     event_type: ev.event_type,
                     team: ev.team,
                     player_index: ev.player_index,
+                    minute: ev.minute,
+                    unused: 0,
                     value: ev.value,
                 });
             }
@@ -268,34 +287,7 @@ impl SimulationCore {
                     let mut last_events = http_state.last_events.lock().unwrap();
                     for ev in &result.events {
                         let formatted_min = protocol::format_match_minute(ev.minute);
-                        let team_name = match ev.team {
-                            Team::Home => "Rustington",
-                            Team::Away => "FC Terminal",
-                        };
-                        let text = match ev.event_type {
-                            EventType::Kickoff => "Kickoff!".into(),
-                            EventType::Goal => format!("⚽ GOAL! {} scores for {}!", ev.player_index, team_name),
-                            EventType::Shot => format!("Shot by player {}", ev.player_index),
-                            EventType::ShotOnTarget => "Shot on target!".into(),
-                            EventType::Save => "Great save!".into(),
-                            EventType::Corner => "Corner kick".into(),
-                            EventType::FreeKick => "Free kick".into(),
-                            EventType::Foul => "Foul committed".into(),
-                            EventType::YellowCard => format!("Yellow card for {}", team_name),
-                            EventType::RedCard => format!("🔴 RED CARD for {}", team_name),
-                            EventType::Substitution => format!("Substitution for {}", team_name),
-                            EventType::HalfTime => "Half Time!".into(),
-                            EventType::FullTime => "Full Time!".into(),
-                            EventType::Injury => format!("Injury to player {}", ev.player_index),
-                            EventType::Offside => "Offside!".into(),
-                            EventType::Miss => "Shot wide".into(),
-                            EventType::PenaltyGoal => format!("⚽ PENALTY GOAL! {} scores for {}!", ev.player_index, team_name),
-                            EventType::PenaltyMiss => format!("❌ Penalty missed by {}!", team_name),
-                            EventType::PenaltySave => format!("🧤 PENALTY SAVED by {} GK!", team_name),
-                            EventType::ExtraTimeStart => "⏰ EXTRA TIME STARTS!".into(),
-                            EventType::ExtraTimeHalfTime => "⏰ Extra Time Half Time!".into(),
-                            EventType::PenaltyShootoutStart => "🧤 PENALTY SHOOTOUT STARTS!".into(),
-                        };
+                        let text = protocol::generate_exciting_commentary(ev.event_type, ev.team, ev.player_index, ev.minute, ev.value);
                         last_events.push(format!("{}' - {}", formatted_min, text));
                     }
                 }
@@ -330,6 +322,22 @@ impl SimulationCore {
 
         // Clean up finished matches
         for id in finished {
+            if let Some(am) = self.matches.get(&id) {
+                let date_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                if let Err(e) = engine::database::save_match(
+                    "simple_footie.db",
+                    &date_str,
+                    "Rustington United",
+                    "FC Terminal",
+                    am.state.score[0],
+                    am.state.score[1],
+                    &am.events,
+                ) {
+                    eprintln!("  ⚠  Failed to save match to database: {e}");
+                } else {
+                    println!("  💾 Match #{} saved to database successfully!", id);
+                }
+            }
             self.matches.remove(&id);
             self.tokens.remove(id);
         }
